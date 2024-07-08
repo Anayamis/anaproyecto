@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Superponer Joya en Cuello</title>
+  <!-- Carga de TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <!-- Carga del modelo de detección de poses de TensorFlow -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  <!-- Carga del backend WebGL para TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <style>
+    /* Estilo para el video y el canvas */
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: block;
+      margin: auto;
+      z-index: 1; /* Asegura que el video esté detrás del canvas */
+    }
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: block;
+      margin: auto;
+      z-index: 2; /* El canvas debe estar sobre el video */
+    }
+    /* Estilo para las imágenes de las joyas */
+    .joya-img {
+      width: 100px;
+      cursor: pointer;
+      margin: 10px;
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 3; /* Asegura que las imágenes de joyas estén sobre el video */
+    }
+    .joya-img:nth-child(2) {
+      left: 130px; /* Ajusta la separación horizontal entre las imágenes */
+    }
+    /* Contenedor de joyas */
+    .joyas-container {
+      text-align: center;
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 4; /* Asegura que el contenedor de joyas esté sobre el video */
+    }
+  </style>
+</head>
+<body>
+  <h1>DEV</h1>
+  <!-- Elemento de video para mostrar la cámara -->
+  <video id="video" width="640" height="480" autoplay playsinline></video>
+  <!-- Canvas para dibujar la joya superpuesta -->
+  <canvas id="canvas" width="640" height="480"></canvas>
+  
+  <!-- Contenedor para las imágenes de joyas -->
+  <div class="joyas-container">
+    <!-- Imagen de joya 1 -->
+    <img src="imagen.png" class="joya-img" id="joya1" alt="Joya 1">
+    <!-- Imagen de joya 2 -->
+    <img src="imagen3.png" class="joya-img" id="joya2" alt="Joya 2">
+  </div>
+
+  <script>
+    // Selección de elementos del DOM
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
+    let ctx = canvas.getContext('2d');
+    let joyaImage1 = new Image();
+    let joyaImage2 = new Image();
+    let selectedJoya = '';
+
+    // Función para configurar la cámara
+    async function setupCamera() {
+      try {
+        console.log("Configurando cámara...");
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user' // Usa la cámara frontal
+          }
+        });
+        video.srcObject = stream; // Asigna el flujo de video al elemento de video
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            resolve(video); // Resuelve la promesa cuando los metadatos del video están cargados
+          };
+        });
+      } catch (error) {
+        console.error('Error accediendo a la cámara: ', error);
+      }
+    }
+
+    // Función para cargar el detector de poses
+    async function loadPoseDetector() {
+      console.log("Cargando detector de poses...");
+      const detectorConfig = { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER };
+      return await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig); // Crea y devuelve el detector de poses
+    }
+
+    // Función para obtener la posición de la joya
+    function getJoyaPosition(pose) {
+      if (!pose || !pose.keypoints) {
+        console.log("Pose no válida");
+        return null;
+      }
+
+      console.log("Keypoints detectados:", pose.keypoints);
+
+      // Encuentra los puntos clave de la nariz y los hombros
+      const nose = pose.keypoints.find(point => point.name === 'nose');
+      const leftShoulder = pose.keypoints.find(point => point.name === 'left_shoulder' || point.name === 'leftShoulder');
+      const rightShoulder = pose.keypoints.find(point => point.name === 'right_shoulder' || point.name === 'rightShoulder');
+
+      console.log("Nose:", nose);
+      console.log("Left Shoulder:", leftShoulder);
+      console.log("Right Shoulder:", rightShoulder);
+
+      if (nose && leftShoulder && rightShoulder) {
+        // Coordenadas del centro del cuello
+        const x = nose.x;
+        const y = (leftShoulder.y + rightShoulder.y) / 2;
+
+        return { x, y, leftShoulder, rightShoulder };
+      }
+      return null;
+    }
+
+    // Función principal para iniciar la aplicación
+    async function startApp() {
+      console.log("Iniciando aplicación...");
+      await setupCamera(); // Configura la cámara
+      const detector = await loadPoseDetector(); // Carga el detector de poses
+
+      if (!detector) {
+        console.error('No se pudo cargar el detector de poses');
+        return;
+      }
+
+      video.play(); // Inicia la reproducción del video
+
+      // Función para detectar poses en bucle
+      async function detectPose() {
+        try {
+          const poses = await detector.estimatePoses(video); // Estima las poses en el video
+          console.log("Poses detectadas: ", poses);
+
+          // Limpiar el canvas antes de dibujar
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          if (poses.length > 0) {
+            const pose = poses[0];
+            const joyaPosition = getJoyaPosition(pose);
+            console.log("Posición de la joya: ", joyaPosition);
+
+            if (joyaPosition && selectedJoya) {
+              const { x, y, leftShoulder, rightShoulder } = joyaPosition;
+              const neckWidth = Math.abs(leftShoulder.x - rightShoulder.x); // Calcula el ancho del cuello
+              const scale = neckWidth / joyaImage1.width; // Escala la joya según el ancho del cuello
+
+              // Ajuste de posición vertical 'y' para colocar la joya en el cuello
+              const yOffset = -joyaImage1.height * scale * 0.7; // Ajusta este valor según sea necesario
+
+              ctx.save();
+              ctx.translate(x, y + yOffset); // Translada el contexto al punto donde se dibujará la joya
+              ctx.scale(scale, scale); // Escala la joya según el ancho del cuello
+              ctx.drawImage(selectedJoya === 'imagen.png' ? joyaImage1 : joyaImage2, -joyaImage1.width / 2, 0); // Dibuja la joya en el canvas
+              ctx.restore();
+              console.log("Joya dibujada");
+            }
+          }
+        } catch (error) {
+          console.error('Error al detectar la pose: ', error);
+        }
+
+        requestAnimationFrame(detectPose); // Llama a detectPose en el siguiente cuadro de animación
+      }
+
+      detectPose(); // Inicia la detección de poses
+    }
+
+    // Event listeners para seleccionar la joya cuando el usuario hace clic en una imagen
+    document.getElementById('joya1').addEventListener('click', () => {
+      selectedJoya = 'imagen.png';
+      joyaImage1.src = selectedJoya;
+      console.log('Joya 1 seleccionada');
+    });
+
+    document.getElementById('joya2').addEventListener('click', () => {
+      selectedJoya = 'imagen3.png';
+      joyaImage2.src = selectedJoya;
+      console.log('Joya 2 seleccionada');
+    });
+
+    // Manejo de la carga de la imagen de joya 1
+    joyaImage1.onload = () => {
+      console.log('Imagen de joya 1 cargada: ', selectedJoya);
+    };
+
+    joyaImage1.onerror = (error) => {
+      console.error('Error cargando la imagen de joya 1: ', error);
+    };
+
+    // Manejo de la carga de la imagen de joya 2
+    joyaImage2.onload = () => {
+      console.log('Imagen de joya 2 cargada: ', selectedJoya);
+    };
+
+    joyaImage2.onerror = (error) => {
+      console.error('Error cargando la imagen de joya 2: ', error);
+    };
+
+    startApp(); // Inicia la aplicación
+  </script>
+</body>
+</html>
